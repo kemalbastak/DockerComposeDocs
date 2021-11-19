@@ -1,0 +1,87 @@
+version: "3.8"
+
+services:
+    django:
+        build: .
+        container_name: django
+        command: python manage.py runserver 0.0.0.0:8000
+        volumes:
+            - .:/usr/src/app/
+        ports:
+            - "8000:8000"
+        environment:
+            - DEBUG=1
+            - DJANGO_ALLOWED_HOSTS=localhost 127.0.0.1 [::1]
+            - CELERY_BROKER=redis://redis:6379/0
+            - CELERY_BACKEND=redis://redis:6379/0
+        depends_on:
+            - pgdb_celery
+            - redis
+    celery:
+        build: .
+        command: celery -A core worker -l INFO
+        volumes:
+            - .:/usr/src/app
+        environment:
+            - DEBUG=1
+            - DJANGO_ALLOWED_HOSTS=localhost 127.0.0.1 [::1]
+            - CELERY_BROKER=redis://redis:6379/0
+            - CELERY_BACKEND=redis://redis:6379/0
+        depends_on:
+            - django
+            - redis
+    celery-beat-db:
+        build: .
+        command: celery -A core beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler
+        volumes:
+            - .:/usr/src/app
+        environment:
+            - DEBUG=1
+            - DJANGO_ALLOWED_HOSTS=localhost 127.0.0.1 [::1]
+            - CELERY_BROKER=redis://redis:6379/0
+            - CELERY_BACKEND=redis://redis:6379/0
+        depends_on:
+            - redis
+            - django
+    pgdb_celery:
+        image: postgres
+        container_name: pgdb_celery
+        ports:
+            - "5432:5432"
+        environment:
+            - POSTGRES_DB=postgres
+            - POSTGRES_USER=postgres
+            - POSTGRES_PASSWORD=postgres
+        volumes:
+            - pgdata:/var/lib/postgresql/data/
+    pgadmin:
+        container_name: pgadmin
+        image: dpage/pgadmin4
+        environment:
+            - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+            - PGADMIN_DEFAULT_PASSWORD=admin1234
+        ports:
+            - 5050:80
+        depends_on:
+            - pgdb_celery
+    redis:
+        image: "redis:alpine"
+
+    flower:
+        container_name: flower
+        build: .
+        command: celery -A core.celery.app flower --port=5555 --basic_auth=user1:password1
+        ports:
+            - 5555:5555
+        environment:
+            - CELERY_BROKER_URL=${CELERY_BROKER}
+            - CELERY_RESULT_BACKEND=django-db
+        volumes:
+            - .:/usr/src/app/
+        depends_on:
+            - django
+            - redis
+            - celery
+
+volumes:
+    pgdata:
